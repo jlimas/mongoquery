@@ -1,0 +1,16 @@
+# Save this as ~/.mongoquery.yaml (or set MONGOQUERY_CONFIG=/path/to/file)
+# Use connection strings whose user has the `read` role only.
+environments:
+  staging:
+    services:
+      orders:
+        uri: mongodb+srv://readonly:pass@staging-orders.example.net/orders_db
+      billing:
+        uri: mongodb+srv://readonly:pass@staging-billing.example.net/billing_db
+  production:
+    services:
+      orders:
+        uri: mongodb+srv://readonly:pass@prod-orders.example.net/orders_db
+        database: orders_db    # optional, overrides db parsed from URI
+      billing:
+        uri: mongodb+srv://readonly:pass@prod-billing.example.net/billing_db
