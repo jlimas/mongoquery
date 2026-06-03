@@ -1,35 +1,44 @@
 # mongoquery
 
-A read-only MongoDB query CLI for inspecting configured environments and services from the terminal. Designed for safe, ad-hoc investigation: connections should use accounts with the `read` role only, and the tool rejects aggregation stages and operators that mutate data or execute server-side code.
+A read-only MongoDB query CLI for inspecting environments and services from the terminal. Built for safe ad-hoc investigation — no GUI, no write risk, just fast access to your data.
+
+Filters and pipelines are validated before they reach MongoDB, rejecting any operator or stage that writes data or executes server-side code. Pair it with a `read`-only database user for defense in depth.
 
 ## Features
 
-- `find`, `aggregate`, and `collections` subcommands
-- Per-environment / per-service connection configuration via YAML
-- Refuses forbidden aggregation stages (`$out`, `$merge`) and operators (`$where`, `$function`, `$accumulator`)
-- Field projection, sort, limit, skip, and string truncation for readable output
-- Configurable query timeouts
+- **Six subcommands:** `find`, `aggregate`, `count`, `distinct`, `collections`, `list`
+- **Multi-environment config:** define named environments and services in a single YAML file
+- **Read-only by construction:** blocks `$out`, `$merge`, `$where`, `$function`, and `$accumulator` before the query is sent
+- **Readable output:** field projection, sort, limit, skip, and string truncation
+- **Configurable timeouts** per query
 
 ## Install
 
-Requires Go 1.21+.
+### From source (requires Go 1.21+)
 
 ```sh
-make build       # produces ./mongoquery
-make install     # copies binary to $HOME/.local/bin (override with PREFIX=...)
+git clone https://github.com/jlimas/mongoquery.git
+cd mongoquery
+make install     # installs to $HOME/.local/bin (override with PREFIX=...)
 ```
 
 Make sure `$HOME/.local/bin` is on your `PATH`.
 
+### Build only
+
+```sh
+make build       # produces ./mongoquery binary in the current directory
+```
+
 ## Configuration
 
-Create `~/.mongoquery.yaml` (or point `MONGOQUERY_CONFIG` at another path):
+Create `~/.mongoquery.yaml` (or point the `MONGOQUERY_CONFIG` environment variable at another path):
 
 ```sh
 make config      # seeds ~/.mongoquery.yaml from config.example.yaml
 ```
 
-Example:
+Config structure:
 
 ```yaml
 environments:
@@ -43,17 +52,19 @@ environments:
     services:
       orders:
         uri: mongodb+srv://readonly:pass@prod-orders.example.net/orders_db
-        database: orders_db    # optional, overrides db parsed from URI
+        database: orders_db    # optional — overrides the database parsed from the URI
 ```
 
-Use connection strings whose user has the `read` role only.
+> **Important:** always use connection strings whose user has the `read` role only.
+
+Run `mongoquery` with no arguments to see all configured environments and services.
 
 ## Usage
 
-Show configured environments, services, and help:
+### List configured environments and services
 
 ```sh
-mongoquery
+mongoquery list
 ```
 
 ### List collections
@@ -68,27 +79,51 @@ mongoquery collections --env <env> --service <svc>
 mongoquery find --env <env> --service <svc> --collection <c> [flags]
 ```
 
-Flags:
-
-| Flag | Description |
-| --- | --- |
-| `--query JSON` | filter (default `{}`) |
-| `--projection JSON` | e.g. `{"_id":0,"email":1}` |
-| `--sort JSON` | e.g. `{"createdAt":-1}` |
-| `--limit N` | default 20 |
-| `--skip N` | default 0 |
-| `--fields a,b,c` | restrict displayed top-level fields |
-| `--full` | disable string truncation |
-| `--timeout N` | seconds, default 30 |
-
-Examples:
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--query JSON` | `{}` | filter in MongoDB Extended JSON |
+| `--projection JSON` | — | e.g. `{"_id":0,"email":1}` |
+| `--sort JSON` | — | e.g. `{"createdAt":-1}` |
+| `--limit N` | `20` | max documents to return |
+| `--skip N` | `0` | documents to skip |
+| `--fields a,b,c` | — | restrict displayed top-level fields |
+| `--full` | — | disable string truncation |
+| `--timeout N` | `30` | query timeout in seconds |
 
 ```sh
 mongoquery find --env staging --service orders --collection users \
-  --query '{"email":"x@y.com"}'
+  --query '{"email":"x@example.com"}'
 
 mongoquery find --env production --service billing --collection invoices \
-  --sort '{"createdAt":-1}' --limit 5
+  --sort '{"createdAt":-1}' --limit 5 --fields _id,amount,status
+```
+
+### Count documents
+
+```sh
+mongoquery count --env <env> --service <svc> --collection <c> [--query JSON]
+```
+
+```sh
+mongoquery count --env staging --service orders --collection users \
+  --query '{"active":true}'
+```
+
+### Distinct values
+
+```sh
+mongoquery distinct --env <env> --service <svc> --collection <c> --field <field> [flags]
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--field` | (required) | field to compute distinct values for |
+| `--query JSON` | `{}` | filter to apply before computing distinct values |
+| `--limit N` | `100` | max values to display |
+| `--timeout N` | `30` | query timeout in seconds |
+
+```sh
+mongoquery distinct --env staging --service orders --collection orders --field status
 ```
 
 ### Aggregate
@@ -97,19 +132,13 @@ mongoquery find --env production --service billing --collection invoices \
 mongoquery aggregate --env <env> --service <svc> --collection <c> --pipeline JSON [flags]
 ```
 
-Flags:
-
-| Flag | Description |
-| --- | --- |
-| `--pipeline JSON` | aggregation array (required) |
-| `--limit N` | soft cap on results (default 100) |
-| `--fields a,b,c` | restrict displayed top-level fields |
-| `--full` | disable string truncation |
-| `--timeout N` | seconds, default 60 |
-
-Forbidden stages: `$out`, `$merge`. Forbidden operators: `$where`, `$function`, `$accumulator`.
-
-Example:
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--pipeline JSON` | (required) | aggregation pipeline array |
+| `--limit N` | `100` | soft cap on results |
+| `--fields a,b,c` | — | restrict displayed top-level fields |
+| `--full` | — | disable string truncation |
+| `--timeout N` | `60` | query timeout in seconds |
 
 ```sh
 mongoquery aggregate --env staging --service orders --collection orders \
@@ -121,12 +150,19 @@ mongoquery aggregate --env staging --service orders --collection orders \
 ```sh
 mongoquery find --help
 mongoquery aggregate --help
+mongoquery count --help
+mongoquery distinct --help
 mongoquery collections --help
 ```
 
 ## Safety
 
-`mongoquery` validates filters and pipelines before sending them to MongoDB and refuses any stage or operator that would write data or execute server-side JavaScript. Pair this with a read-only database user for defense in depth.
+`mongoquery` enforces read-only behavior at two layers:
+
+1. **In-process validation** — filters and pipelines are scanned before being sent to MongoDB. The following are rejected outright:
+   - Aggregation stages: `$out`, `$merge`
+   - Operators: `$where`, `$function`, `$accumulator`
+2. **Connection-level enforcement** — use a database user with the `read` role only. The binary has no write operations (`InsertOne`, `UpdateMany`, etc.) and never will.
 
 ## Development
 
