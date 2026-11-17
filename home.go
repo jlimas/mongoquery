@@ -12,7 +12,7 @@ func cmdHome(_ context.Context) error {
 	o := newOut()
 	o.line("bin: %s", binPath())
 	o.line("description: Read-only MongoDB query CLI for configured environments and services")
-	o.line("commands: find, aggregate, count, distinct, collections, list")
+	o.line("commands: find, aggregate, count, distinct, collections, list, version")
 	o.line("usage: mongoquery <command> --help")
 
 	cfg, err := loadConfig()
