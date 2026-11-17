@@ -44,6 +44,35 @@ func (t targetFlags) validate(withCollection bool) error {
 	return nil
 }
 
+func validateBounds(timeout, limit int, skip int64) error {
+	if timeout <= 0 || time.Duration(timeout) > time.Duration(1<<63-1)/time.Second {
+		return fmt.Errorf("--timeout must be positive and fit in a duration")
+	}
+	if limit <= 0 {
+		return fmt.Errorf("--limit must be positive")
+	}
+	if skip < 0 {
+		return fmt.Errorf("--skip must be nonnegative")
+	}
+	return nil
+}
+
+// collectDocuments never returns partial results after a cursor failure.
+func collectDocuments(ctx context.Context, cursor *mongo.Cursor, limit int) ([]bson.M, error) {
+	var docs []bson.M
+	for len(docs) < limit && cursor.Next(ctx) {
+		var doc bson.M
+		if err := cursor.Decode(&doc); err != nil {
+			return nil, err
+		}
+		docs = append(docs, doc)
+	}
+	if err := cursor.Err(); err != nil {
+		return nil, err
+	}
+	return docs, nil
+}
+
 // connect opens a Mongo client and returns the resolved database handle.
 func connect(ctx context.Context, cfg *Config, env, service string) (*mongo.Client, *mongo.Database, error) {
 	svc, err := cfg.resolve(env, service)
@@ -143,6 +172,10 @@ func cmdFind(parentCtx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateBounds(*timeoutSec, *limit, *skip); err != nil {
+		printError(err.Error(), "")
+		return err
+	}
 	if err := t.validate(true); err != nil {
 		printError(err.Error(), "Run `mongoquery find --help` for flag reference")
 		return err
@@ -159,6 +192,10 @@ func cmdFind(parentCtx context.Context, args []string) error {
 	proj, err := parseExtJSONDoc(*projection)
 	if err != nil {
 		printError(err.Error(), `Example: --projection '{"_id":0,"email":1}'`)
+		return err
+	}
+	if err := scanForbidden(proj); err != nil {
+		printError(err.Error(), "Remove forbidden operators from the projection")
 		return err
 	}
 	sortDoc, err := parseExtJSONDoc(*sortFlag)
@@ -278,6 +315,10 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if err := validateBounds(*timeoutSec, *limit, 0); err != nil {
+		printError(err.Error(), "")
+		return err
+	}
 	if err := t.validate(true); err != nil {
 		printError(err.Error(), "Run `mongoquery aggregate --help` for flag reference")
 		return err
@@ -314,17 +355,10 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 	}
 	defer cursor.Close(ctx)
 
-	var docs []bson.M
-	for cursor.Next(ctx) {
-		var d bson.M
-		if err := cursor.Decode(&d); err != nil {
-			printError(fmt.Sprintf("decode failed: %s", err), "")
-			return err
-		}
-		docs = append(docs, d)
-		if len(docs) >= *limit {
-			break
-		}
+	docs, err := collectDocuments(ctx, cursor, *limit)
+	if err != nil {
+		printError(fmt.Sprintf("read results failed: %s", err), "")
+		return err
 	}
 
 	truncate := defaultStringTruncate
@@ -363,6 +397,10 @@ func cmdCount(parentCtx context.Context, args []string) error {
 		o.line("  mongoquery count --env staging --service orders --collection users --query '{\"active\":true}'")
 	}
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateBounds(*timeoutSec, 1, 0); err != nil {
+		printError(err.Error(), "")
 		return err
 	}
 	if err := t.validate(true); err != nil {
@@ -420,6 +458,10 @@ func cmdDistinct(parentCtx context.Context, args []string) error {
 		o.line("  mongoquery distinct --env staging --service orders --collection orders --field status")
 	}
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateBounds(*timeoutSec, *limit, 0); err != nil {
+		printError(err.Error(), "")
 		return err
 	}
 	if err := t.validate(true); err != nil {
@@ -491,6 +533,10 @@ func cmdCollections(parentCtx context.Context, args []string) error {
 		o.line("usage: mongoquery collections --env <env> --service <svc>")
 	}
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if err := validateBounds(*timeoutSec, 1, 0); err != nil {
+		printError(err.Error(), "")
 		return err
 	}
 	if err := t.validate(false); err != nil {
