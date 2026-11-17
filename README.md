@@ -14,6 +14,35 @@ Filters and pipelines are validated before they reach MongoDB, rejecting any ope
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```sh
+brew install jlimas/tap/mongoquery
+```
+
+### Quick install (macOS and Linux, no Go required)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jlimas/mongoquery/main/scripts/install.sh | sh
+```
+
+The installer downloads the latest release for your OS and CPU, verifies its
+SHA-256 checksum, and installs to `~/.local/bin` without sudo. Add that directory
+to your `PATH`. To choose another location:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jlimas/mongoquery/main/scripts/install.sh \
+  | MONGOQUERY_INSTALL_DIR="$HOME/bin" sh
+```
+
+To inspect the installer first, download the script and run it locally instead
+of piping it to `sh`. On Windows, download the matching `windows_amd64.zip` or
+`windows_arm64.zip` archive from [GitHub Releases](https://github.com/jlimas/mongoquery/releases/latest),
+verify it against `checksums.txt`, and put `mongoquery.exe` on your `PATH`.
+
+Binary installation and the Homebrew formula become available with the first
+published CalVer release. `mongoquery --version` shows the installed release.
+
 ### From source (requires Go 1.27.4+)
 
 ```sh
@@ -31,8 +60,8 @@ make build       # produces ./mongoquery binary in the current directory
 ```
 
 Builds embed the Git tag or revision (with `-dirty` for local changes).
-Override it for releases with `make build VERSION=v1.2.3`. Builds made directly
-with `go build` report `dev` unless `-ldflags '-X main.version=v1.2.3'` is supplied.
+Override it for releases with `make build VERSION=v2026.11.17.1`. Builds made directly
+with `go build` report `dev` unless `-ldflags '-X main.version=v2026.11.17.1'` is supplied.
 
 ## Configuration
 
@@ -229,3 +258,44 @@ make clean       # remove built binary
 CI uses the Go version in `go.mod` and runs formatting, vet, race tests, builds,
 and vulnerability scanning. Dependabot checks Go modules (including development
 tools) and GitHub Actions weekly.
+
+## Releases
+
+Releases use **CalVer `vYYYY.MM.DD.N`**: a UTC date with a daily sequence starting
+at `1`, for example `v2026.11.17.1`, then `v2026.11.17.2`. Month and day use two
+digits. Tags with invalid dates or nonpositive/zero-padded sequences are rejected.
+
+1. Merge the release changes to `main` and wait for CI.
+2. In GitHub's **Releases → Draft a new release**, create the CalVer tag targeting
+   the intended `main` commit, generate release notes, and publish. Or use:
+
+   ```sh
+   gh release create v2026.11.17.1 --target main --generate-notes
+   ```
+
+3. The **Release** workflow checks out that exact tag, runs tests/vet/vulnerability
+   checks, and attaches six archives (Linux/macOS/Windows, amd64/arm64), a
+   `checksums.txt` manifest, and the generated Homebrew formula. Each binary embeds
+   the release tag; each archive includes the license, README, and sample config.
+4. After uploading, the workflow updates `jlimas/homebrew-tap` with platform-specific
+   archive URLs and SHA-256 checksums. Users update with `brew update && brew upgrade mongoquery`.
+
+Publishing triggers builds; wait for the workflow to finish before announcing
+the release. Publishing a release through the UI or an authenticated `gh` session
+triggers Actions; releases created by another workflow's default `GITHUB_TOKEN`
+do not. Existing release assets are never overwritten. For a corrected release,
+increment the daily sequence rather than moving a published tag.
+
+The tap update uses the `HOMEBREW_TAP_SSH_KEY` Actions secret, a write-enabled
+deploy key scoped only to `jlimas/homebrew-tap`. The main repository's token only
+gets write access in the asset-upload job. If the tap update fails, fix access
+and rerun only that failed job; do not rerun a successful asset upload.
+
+To build release archives locally without publishing anything:
+
+```sh
+go run ./internal/release --version v2026.11.17.1 --output dist
+```
+
+The output directory must not already exist. Downloaded archives can be checked
+with `sha256sum` on Linux or `shasum -a 256` on macOS against `checksums.txt`.

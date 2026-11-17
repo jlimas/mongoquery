@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
-Single-package Go CLI (`package main`) for read-only MongoDB inspection. All source files sit at the repo root — no subpackages.
+Single-package Go CLI (`package main`) for read-only MongoDB inspection. Application source files sit at the repo root; the separate `internal/release` command builds release archives and generates the Homebrew formula.
 
 Request flow per invocation:
 1. `main.go` dispatches `os.Args[1:]` on the first positional token to a `cmd*` handler. Subcommands beyond the README: `home`, `list`, `count`, `distinct` (see `main.go` switch for the full set).
@@ -23,6 +23,13 @@ Request flow per invocation:
 4. Results are rendered via helpers in `output.go` (field projection, string truncation, pretty-printing). `home.go` renders the no-arg landing screen listing configured envs/services.
 
 Database commands support `--format json` for canonical Extended JSON with no truncation or hints. Errors go to stderr. Find only runs an exact matching count when `--count` is requested.
+
+## Releases and installation
+
+- Publishing a GitHub Release with a `vYYYY.MM.DD.N` CalVer tag triggers `.github/workflows/release.yml`.
+- `go run ./internal/release --version v2026.11.17.1 --output dist` builds all six platform archives, checksums, and the Homebrew formula into a new directory.
+- After assets upload, the workflow updates `jlimas/homebrew-tap` using the repo-scoped `HOMEBREW_TAP_SSH_KEY` deploy key. Prereleases/older releases do not update the stable formula.
+- `scripts/install.sh` downloads the latest Linux/macOS archive, verifies its checksum, and installs without sudo. Tests stub only network/platform discovery; they use real archive, checksum, and install utilities.
 
 Config model (`config.go`): two-level map `environments[env].services[service] → {uri, database?}`. Resolution errors list configured keys via `joinKeys` to make typos obvious.
 
