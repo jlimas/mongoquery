@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -12,8 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
-
-const defaultTimeout = 30 * time.Second
 
 type targetFlags struct {
 	env, service, collection string
@@ -168,9 +167,13 @@ func cmdFind(parentCtx context.Context, args []string) error {
 	skip := fs.Int64("skip", 0, "documents to skip")
 	fields := fs.String("fields", "", "comma-separated top-level fields to display")
 	full := fs.Bool("full", false, "do not truncate string values")
+	format := fs.String("format", "text", "output format: text or canonical Extended JSON (json)")
 	timeoutSec := fs.Int("timeout", 30, "query timeout in seconds")
 	fs.Usage = func() { findUsage() }
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateFormat(*format); err != nil {
 		return err
 	}
 	if err := validateBounds(*timeoutSec, *limit, *skip); err != nil {
@@ -254,6 +257,13 @@ func cmdFind(parentCtx context.Context, args []string) error {
 	if *full {
 		truncate = 0
 	}
+	if *format == "json" {
+		if *count {
+			selected := selectDocuments(docs, splitCSV(*fields))
+			return writeJSON(os.Stdout, bson.D{{Key: "results", Value: selected}, {Key: "total", Value: int64(totalI)}})
+		}
+		return writeJSONResults(docs, splitCSV(*fields))
+	}
 	renderResults("results", docs, len(docs), totalI, splitCSV(*fields), truncate)
 
 	if len(docs) == 0 {
@@ -287,6 +297,7 @@ func findUsage() {
 	o.line("  --skip N             default 0")
 	o.line("  --fields a,b,c       restrict displayed top-level fields")
 	o.line("  --full               disable string truncation")
+	o.line("  --format text|json   output format, default text")
 	o.line("  --timeout N          seconds, default 30")
 	o.line("examples:")
 	o.line("  mongoquery find --env staging --service orders --collection users --query '{\"email\":\"x@y.com\"}'")
@@ -299,10 +310,11 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 	fs := flag.NewFlagSet("aggregate", flag.ContinueOnError)
 	var t targetFlags
 	registerTarget(fs, &t, true)
-	pipeline := fs.String("pipeline", "[]", "pipeline as MongoDB Extended JSON array")
+	pipeline := fs.String("pipeline", "", "pipeline as MongoDB Extended JSON array (required)")
 	limit := fs.Int("limit", 100, "soft cap on returned documents")
 	fields := fs.String("fields", "", "comma-separated top-level fields to display")
 	full := fs.Bool("full", false, "do not truncate string values")
+	format := fs.String("format", "text", "output format: text or canonical Extended JSON (json)")
 	timeoutSec := fs.Int("timeout", 60, "query timeout in seconds")
 	fs.Usage = func() {
 		o := newOut()
@@ -312,13 +324,17 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 		o.line("  --limit N         soft cap on results (default 100)")
 		o.line("  --fields a,b,c    restrict displayed top-level fields")
 		o.line("  --full            disable string truncation")
+		o.line("  --format text|json output format, default text")
 		o.line("  --timeout N       seconds, default 60")
 		o.line("forbidden stages: $out, $merge")
 		o.line("forbidden operators: $where, $function, $accumulator")
 		o.line("example:")
 		o.line("  mongoquery aggregate --env staging --service orders --collection orders --pipeline '[{\"$match\":{\"status\":\"paid\"}},{\"$group\":{\"_id\":\"$userId\",\"n\":{\"$sum\":1}}}]'")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateFormat(*format); err != nil {
 		return err
 	}
 	if err := validateBounds(*timeoutSec, *limit, 0); err != nil {
@@ -327,6 +343,11 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 	}
 	if err := t.validate(true); err != nil {
 		printError(err.Error(), "Run `mongoquery aggregate --help` for flag reference")
+		return err
+	}
+	if strings.TrimSpace(*pipeline) == "" {
+		err := fmt.Errorf("missing required flag: --pipeline")
+		printError(err.Error(), "Use --pipeline '[]' for an empty pipeline")
 		return err
 	}
 	pipe, err := parseExtJSONArray(*pipeline)
@@ -371,6 +392,9 @@ func cmdAggregate(parentCtx context.Context, args []string) error {
 	if *full {
 		truncate = 0
 	}
+	if *format == "json" {
+		return writeJSONResults(docs, splitCSV(*fields))
+	}
 	renderResults("results", docs, len(docs), -1, splitCSV(*fields), truncate)
 	if len(docs) == 0 {
 		printHelp("Pipeline returned 0 documents", "Verify $match clauses and field names")
@@ -395,14 +419,20 @@ func cmdCount(parentCtx context.Context, args []string) error {
 	var t targetFlags
 	registerTarget(fs, &t, true)
 	query := fs.String("query", "{}", "filter as MongoDB Extended JSON")
+	format := fs.String("format", "text", "output format: text or canonical Extended JSON (json)")
 	timeoutSec := fs.Int("timeout", 30, "query timeout in seconds")
 	fs.Usage = func() {
 		o := newOut()
 		o.line("usage: mongoquery count --env <env> --service <svc> --collection <c> [--query JSON]")
+		o.line("  --timeout N       seconds, default 30")
+		o.line("  --format text|json output format, default text")
 		o.line("example:")
 		o.line("  mongoquery count --env staging --service orders --collection users --query '{\"active\":true}'")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateFormat(*format); err != nil {
 		return err
 	}
 	if err := validateBounds(*timeoutSec, 1, 0); err != nil {
@@ -440,6 +470,9 @@ func cmdCount(parentCtx context.Context, args []string) error {
 		printError(fmt.Sprintf("count failed: %s", err), "")
 		return err
 	}
+	if *format == "json" {
+		return writeJSON(os.Stdout, bson.D{{Key: "collection", Value: db.Name() + "." + t.collection}, {Key: "matched", Value: n}})
+	}
 	o := newOut()
 	o.line("count:")
 	o.line("  collection: %s.%s", db.Name(), t.collection)
@@ -455,6 +488,7 @@ func cmdDistinct(parentCtx context.Context, args []string) error {
 	registerTarget(fs, &t, true)
 	field := fs.String("field", "", "field name to compute distinct values for (required)")
 	query := fs.String("query", "{}", "filter as MongoDB Extended JSON")
+	format := fs.String("format", "text", "output format: text or canonical Extended JSON (json)")
 	limit := fs.Int("limit", 100, "max values to display; server still computes all distinct values")
 	timeoutSec := fs.Int("timeout", 30, "query timeout in seconds")
 	fs.Usage = func() {
@@ -463,11 +497,15 @@ func cmdDistinct(parentCtx context.Context, args []string) error {
 		o.line("flags:")
 		o.line("  --limit N         max values displayed, default 100 (not a server-side limit)")
 		o.line("  --timeout N       seconds, default 30")
+		o.line("  --format text|json output format, default text")
 		o.line("warning: MongoDB computes all distinct values; use a $group/$limit pipeline for high-cardinality fields")
 		o.line("example:")
 		o.line("  mongoquery distinct --env staging --service orders --collection orders --field status")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateFormat(*format); err != nil {
 		return err
 	}
 	if err := validateBounds(*timeoutSec, *limit, 0); err != nil {
@@ -520,6 +558,12 @@ func cmdDistinct(parentCtx context.Context, args []string) error {
 	if shown > *limit {
 		shown = *limit
 	}
+	if *format == "json" {
+		if values == nil {
+			values = []any{}
+		}
+		return writeJSON(os.Stdout, values[:shown])
+	}
 	o := newOut()
 	o.line("distinct[%d of %d total]:", shown, total)
 	for i := 0; i < shown; i++ {
@@ -538,11 +582,17 @@ func cmdCollections(parentCtx context.Context, args []string) error {
 	var t targetFlags
 	registerTarget(fs, &t, false)
 	timeoutSec := fs.Int("timeout", 15, "query timeout in seconds")
+	format := fs.String("format", "text", "output format: text or canonical Extended JSON (json)")
 	fs.Usage = func() {
 		o := newOut()
 		o.line("usage: mongoquery collections --env <env> --service <svc>")
+		o.line("  --timeout N       seconds, default 15")
+		o.line("  --format text|json output format, default text")
 	}
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if err := validateFormat(*format); err != nil {
 		return err
 	}
 	if err := validateBounds(*timeoutSec, 1, 0); err != nil {
@@ -570,6 +620,12 @@ func cmdCollections(parentCtx context.Context, args []string) error {
 	if err != nil {
 		printError(fmt.Sprintf("listCollections failed: %s", err), "")
 		return err
+	}
+	if *format == "json" {
+		if names == nil {
+			names = []string{}
+		}
+		return writeJSON(os.Stdout, names)
 	}
 	o := newOut()
 	o.line("collections[%d] in %s:", len(names), db.Name())

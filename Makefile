@@ -1,7 +1,7 @@
 BINARY := mongoquery
 PREFIX ?= $(HOME)/.local
 INSTALL_DIR := $(PREFIX)/bin
-CONFIG := $(HOME)/.mongoquery.yaml
+CONFIG := $(if $(MONGOQUERY_CONFIG),$(MONGOQUERY_CONFIG),$(HOME)/.mongoquery.yaml)
 GO ?= go
 LDFLAGS := -s -w
 
@@ -39,10 +39,10 @@ clean:
 	rm -f $(BINARY)
 
 config:
-	@if [ -f $(CONFIG) ]; then \
+	@if [ -e "$(CONFIG)" ] || [ -L "$(CONFIG)" ]; then \
 		echo "config exists: $(CONFIG)"; \
 	else \
-		cp config.example.yaml $(CONFIG); \
+		(umask 077; set -C; cat config.example.yaml > "$(CONFIG)") && \
 		echo "created: $(CONFIG) — edit it before running"; \
 	fi
 

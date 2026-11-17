@@ -14,7 +14,7 @@ Filters and pipelines are validated before they reach MongoDB, rejecting any ope
 
 ## Install
 
-### From source (requires Go 1.21+)
+### From source (requires Go 1.25+)
 
 ```sh
 git clone https://github.com/jlimas/mongoquery.git
@@ -56,6 +56,11 @@ environments:
 ```
 
 > **Important:** always use connection strings whose user has the `read` role only.
+
+`make config` respects `MONGOQUERY_CONFIG`, creates the file with owner-only
+permissions (`0600`), and leaves existing files untouched. Keep credentials out of
+version control. Configuration rejects unknown keys, empty environment maps, and
+multiple YAML documents so typos do not silently change the selected target.
 
 Run `mongoquery` with no arguments to see all configured environments and services.
 
@@ -167,13 +172,34 @@ mongoquery distinct --help
 mongoquery collections --help
 ```
 
+### Machine-readable output
+
+All database commands (`find`, `aggregate`, `count`, `distinct`, `collections`)
+accept `--format json`. This emits canonical MongoDB Extended JSON, preserving
+ObjectIDs, numeric types, dates, and decimals without string truncation or help
+text. `--fields` still restricts displayed fields for find and aggregate.
+
+```sh
+mongoquery find --env staging --service orders --collection users \
+  --format json > users.json
+```
+
+Find and aggregate return arrays of documents; distinct returns an array of
+values; collections returns an array of names. With `find --count`, the result
+is an object containing `results` and `total`. Count returns an object containing
+`collection` and `matched`. Empty result arrays are `[]`, not `null`.
+
+Errors go to stderr and return a nonzero exit status. Subcommand `--help`
+succeeds without requiring configuration. Unknown positional arguments are
+rejected; supply all query options as flags.
+
 ## Safety
 
 `mongoquery` enforces read-only behavior at two layers:
 
 1. **In-process validation** — filters and pipelines are scanned before being sent to MongoDB. The following are rejected outright:
    - Aggregation stages: `$out`, `$merge`
-   - Operators: `$where`, `$function`, `$accumulator`
+   - Operators in filters, projections, and pipelines: `$where`, `$function`, `$accumulator`
 2. **Connection-level enforcement** — use a database user with the `read` role only. The binary has no write operations (`InsertOne`, `UpdateMany`, etc.) and never will.
 
 ## Development

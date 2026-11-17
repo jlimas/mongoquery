@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,9 +29,9 @@ func (o *out) line(format string, args ...any) {
 	fmt.Fprintf(o.w, format+"\n", args...)
 }
 
-// printError writes a structured error block to stdout.
+// printError writes a structured error block to stderr, never into result data.
 func printError(msg, help string) {
-	w := newOut()
+	w := &out{w: os.Stderr}
 	w.line("error: %s", msg)
 	if help != "" {
 		w.line("help: %s", help)
@@ -177,18 +179,19 @@ func scalar(v any, truncate int) string {
 	case bson.ObjectID:
 		return x.Hex()
 	case time.Time:
-		return x.UTC().Format(time.RFC3339)
+		return x.UTC().Format(time.RFC3339Nano)
 	case bson.DateTime:
-		return x.Time().UTC().Format(time.RFC3339)
+		return x.Time().UTC().Format(time.RFC3339Nano)
 	default:
 		return quoteAndTrunc(fmt.Sprintf("%v", v), truncate)
 	}
 }
 
 func quoteAndTrunc(s string, truncate int) string {
-	original := len(s)
+	runes := []rune(s)
+	original := len(runes)
 	if truncate > 0 && original > truncate {
-		s = s[:truncate] + "..."
+		s = string(runes[:truncate]) + "..."
 	}
 	if needsQuote(s) {
 		s = strconv.Quote(s)
@@ -203,11 +206,62 @@ func needsQuote(s string) bool {
 	if s == "" {
 		return true
 	}
-	if strings.ContainsAny(s, ":,\n\"#") {
+	if strings.ContainsAny(s, ":,\n\"#\r\t") || strings.IndexFunc(s, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
 		return true
 	}
 	if strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") {
 		return true
 	}
 	return false
+}
+
+func validateFormat(format string) error {
+	if format != "text" && format != "json" {
+		err := fmt.Errorf("--format must be text or json")
+		printError(err.Error(), "")
+		return err
+	}
+	return nil
+}
+
+// writeJSON emits canonical Extended JSON without truncating or coercing BSON
+// types. Wrapping allows the driver to encode arrays and scalar values too.
+func writeJSON(w io.Writer, value any) error {
+	encoded, err := bson.MarshalExtJSON(bson.D{{Key: "value", Value: value}}, true, false)
+	if err != nil {
+		return err
+	}
+	var wrapper struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(encoded, &wrapper); err != nil {
+		return err
+	}
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, wrapper.Value, "", "  "); err != nil {
+		return err
+	}
+	formatted.WriteByte('\n')
+	_, err = w.Write(formatted.Bytes())
+	return err
+}
+
+func selectDocuments(docs []bson.M, fields []string) []bson.M {
+	selected := make([]bson.M, 0, len(docs))
+	for _, doc := range docs {
+		if len(fields) == 0 {
+			selected = append(selected, doc)
+			continue
+		}
+		result := bson.M{}
+		for _, key := range selectKeys(doc, fields) {
+			result[key] = doc[key]
+		}
+		selected = append(selected, result)
+	}
+	return selected
+}
+
+func writeJSONResults(docs []bson.M, fields []string) error {
+	return writeJSON(os.Stdout, selectDocuments(docs, fields))
 }
