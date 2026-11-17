@@ -14,7 +14,7 @@ Filters and pipelines are validated before they reach MongoDB, rejecting any ope
 
 ## Install
 
-### From source (requires Go 1.25+)
+### From source (requires Go 1.27.4+)
 
 ```sh
 git clone https://github.com/jlimas/mongoquery.git
@@ -208,6 +208,11 @@ rejected; supply all query options as flags.
 make fmt         # go fmt
 make vet         # go vet
 make test        # go test
+make vuln        # govulncheck (version managed in go.mod)
 make tidy        # go mod tidy
 make clean       # remove built binary
 ```
+
+CI uses the Go version in `go.mod` and runs formatting, vet, race tests, builds,
+and vulnerability scanning. Dependabot checks Go modules (including development
+tools) and GitHub Actions weekly.

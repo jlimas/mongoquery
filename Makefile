@@ -5,7 +5,7 @@ CONFIG := $(if $(MONGOQUERY_CONFIG),$(MONGOQUERY_CONFIG),$(HOME)/.mongoquery.yam
 GO ?= go
 LDFLAGS := -s -w
 
-.PHONY: all build install uninstall run tidy fmt vet test clean config help
+.PHONY: all build install uninstall run tidy fmt vet test vuln clean config help
 
 all: build
 
@@ -35,6 +35,9 @@ vet:
 test:
 	$(GO) test ./...
 
+vuln:
+	$(GO) tool govulncheck ./...
+
 clean:
 	rm -f $(BINARY)
 
@@ -56,5 +59,6 @@ help:
 	@echo "  fmt        go fmt"
 	@echo "  vet        go vet"
 	@echo "  test       go test"
+	@echo "  vuln       scan reachable dependencies for known vulnerabilities"
 	@echo "  clean      remove built binary"
 	@echo "  config     seed ~/.mongoquery.yaml from example"
