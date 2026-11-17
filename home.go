@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -13,6 +12,8 @@ func cmdHome(_ context.Context) error {
 	o := newOut()
 	o.line("bin: %s", binPath())
 	o.line("description: Read-only MongoDB query CLI for configured environments and services")
+	o.line("commands: find, aggregate, count, distinct, collections, list")
+	o.line("usage: mongoquery <command> --help")
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -84,6 +85,3 @@ func binPath() string {
 	}
 	return exe
 }
-
-// silence go vet about unused import when exec.Command isn't used; we may add hooks later.
-var _ = exec.Command

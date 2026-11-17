@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,8 +46,17 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("cannot read config %s: %w", p, err)
 	}
 	var c Config
-	if err := yaml.Unmarshal(data, &c); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&c); err != nil {
 		return nil, fmt.Errorf("invalid YAML in %s: %w", p, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return nil, fmt.Errorf("config %s must contain exactly one YAML document", p)
+	}
+	if len(c.Environments) == 0 {
+		return nil, fmt.Errorf("config %s has no environments", p)
 	}
 	c.path = p
 	return &c, nil

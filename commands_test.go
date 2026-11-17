@@ -25,15 +25,19 @@ type mongoStub struct {
 	mu        sync.Mutex
 	commands  []string
 	failCount bool
+	failMore  bool
 }
 
-func newMongoStub(t *testing.T, failCount bool) *mongoStub {
+func newMongoStub(t *testing.T, failCount bool, failMore ...bool) *mongoStub {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &mongoStub{t: t, listener: listener, failCount: failCount}
+	if len(failMore) > 0 {
+		s.failMore = failMore[0]
+	}
 	t.Cleanup(func() { listener.Close() })
 	go func() {
 		for {
@@ -117,11 +121,19 @@ func (s *mongoStub) serve(conn net.Conn) {
 				if command == "aggregate" {
 					doc = bson.D{{Key: "n", Value: int32(42)}}
 				}
+				var cursorID int64
+				if s.failMore {
+					cursorID = 123
+				}
 				response = append(response, bson.E{Key: "cursor", Value: bson.D{
-					{Key: "id", Value: int64(0)}, {Key: "ns", Value: "db.users"},
+					{Key: "id", Value: cursorID}, {Key: "ns", Value: "db.users"},
 					{Key: "firstBatch", Value: bson.A{doc}},
 				}})
 			}
+		case "getMore":
+			response = bson.D{{Key: "ok", Value: 0}, {Key: "code", Value: 50}, {Key: "errmsg", Value: "getMore exceeded time limit"}}
+		case "killCursors":
+			response = append(response, bson.E{Key: "cursorsKilled", Value: bson.A{int64(123)}})
 		}
 		payload, err := bson.Marshal(response)
 		if err != nil {
@@ -146,6 +158,23 @@ func (s *mongoStub) serve(conn net.Conn) {
 	}
 }
 
+func TestAggregationDoesNotReportPartialResultsOnGetMoreFailure(t *testing.T) {
+	newMongoStub(t, false, true)
+	for _, format := range []string{"text", "json"} {
+		t.Run(format, func(t *testing.T) {
+			out, stderr, err := captureCommand(t, func() error {
+				return cmdAggregate(context.Background(), []string{
+					"--env", "test", "--service", "app", "--collection", "users",
+					"--pipeline", "[]", "--format", format,
+				})
+			})
+			if err == nil || out != "" || !strings.Contains(stderr, "getMore exceeded time limit") {
+				t.Fatalf("partial result or swallowed failure: stdout=%q stderr=%q err=%v", out, stderr, err)
+			}
+		})
+	}
+}
+
 func TestFindCountIsOptIn(t *testing.T) {
 	for _, tt := range []struct {
 		name       string
@@ -164,29 +193,21 @@ func TestFindCountIsOptIn(t *testing.T) {
 			if tt.count {
 				args = append(args, "--count")
 			}
-			// Small output is captured in a regular file to avoid pipe backpressure.
-			output, err := os.CreateTemp(t.TempDir(), "output")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer output.Close()
-			original := os.Stdout
-			os.Stdout = output
-			defer func() { os.Stdout = original }()
-			err = cmdFind(context.Background(), args)
-			os.Stdout = original
+			stdout, stderr, err := captureCommand(t, func() error {
+				return cmdFind(context.Background(), args)
+			})
 			if (err != nil) != tt.failCount {
 				t.Fatalf("unexpected command error: %v", err)
 			}
-			data, err := os.ReadFile(output.Name())
-			if err != nil {
-				t.Fatal(err)
+			data := stdout
+			if tt.failCount {
+				data = stderr
 			}
-			if !strings.Contains(string(data), tt.wantHeader) {
+			if !strings.Contains(data, tt.wantHeader) {
 				t.Fatalf("missing %q in %s", tt.wantHeader, data)
 			}
-			if tt.failCount && strings.Contains(string(data), "results[") {
-				t.Fatalf("count failure reported successful results: %s", data)
+			if tt.failCount && stdout != "" {
+				t.Fatalf("count failure wrote to stdout: %s", stdout)
 			}
 			server.mu.Lock()
 			calls := append([]string(nil), server.commands...)
