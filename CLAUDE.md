@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- `make build` — compile `./mongoquery` (Go 1.25+).
+- `make build` — compile `./mongoquery` (Go 1.27.4+).
 - `make install` — install to `$HOME/.local/bin` (override with `PREFIX=...`).
 - `make run ARGS='find --env staging ...'` — build and run with arguments.
 - `make fmt` / `make vet` / `make test` / `make tidy` — standard Go workflow targets.
+- `make vuln` — scan dependencies with the `govulncheck` tool pinned in `go.mod`.
 - `go test ./... -run TestName` — run a single test.
 - `make config` — seed `~/.mongoquery.yaml` from `config.example.yaml`. `MONGOQUERY_CONFIG` overrides the path.
 
