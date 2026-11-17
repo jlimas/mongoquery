@@ -85,6 +85,7 @@ mongoquery find --env <env> --service <svc> --collection <c> [flags]
 | `--projection JSON` | — | e.g. `{"_id":0,"email":1}` |
 | `--sort JSON` | — | e.g. `{"createdAt":-1}` |
 | `--limit N` | `20` | max documents to return |
+| `--count` | `false` | include exact matching total; may scan many documents |
 | `--skip N` | `0` | documents to skip |
 | `--fields a,b,c` | — | restrict displayed top-level fields |
 | `--full` | — | disable string truncation |
@@ -126,6 +127,11 @@ mongoquery distinct --env <env> --service <svc> --collection <c> --field <field>
 mongoquery distinct --env staging --service orders --collection orders --field status
 ```
 
+`--limit` only caps displayed distinct values: MongoDB still computes and returns
+the complete set, which can be expensive or exceed its BSON response size limit.
+For high-cardinality fields, use an aggregation with `$group` followed by `$limit`
+to bound returned results (grouping itself can still scan the full input).
+
 ### Aggregate
 
 ```sh
@@ -139,6 +145,12 @@ mongoquery aggregate --env <env> --service <svc> --collection <c> --pipeline JSO
 | `--fields a,b,c` | — | restrict displayed top-level fields |
 | `--full` | — | disable string truncation |
 | `--timeout N` | `60` | query timeout in seconds |
+
+Limits and timeouts must be positive; skip must be nonnegative. Aggregation
+`--limit` caps client-side output, not the work required by the pipeline. Put
+appropriate `$match`, `$project`, and `$limit` stages in the pipeline to reduce
+server work where semantics allow. Find queries do not compute an exact total
+unless `--count` is supplied.
 
 ```sh
 mongoquery aggregate --env staging --service orders --collection orders \

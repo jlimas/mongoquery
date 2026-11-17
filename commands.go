@@ -164,6 +164,7 @@ func cmdFind(parentCtx context.Context, args []string) error {
 	projection := fs.String("projection", "", "projection as MongoDB Extended JSON")
 	sortFlag := fs.String("sort", "", "sort as MongoDB Extended JSON, e.g. '{\"createdAt\":-1}'")
 	limit := fs.Int("limit", 20, "max documents to return")
+	count := fs.Bool("count", false, "include an exact matching count (may scan many documents)")
 	skip := fs.Int64("skip", 0, "documents to skip")
 	fields := fs.String("fields", "", "comma-separated top-level fields to display")
 	full := fs.Bool("full", false, "do not truncate string values")
@@ -233,15 +234,19 @@ func cmdFind(parentCtx context.Context, args []string) error {
 		return err
 	}
 	defer cursor.Close(ctx)
-	var docs []bson.M
-	if err := cursor.All(ctx, &docs); err != nil {
+	docs, err := collectDocuments(ctx, cursor, *limit)
+	if err != nil {
 		printError(fmt.Sprintf("decode failed: %s", err), "")
 		return err
 	}
 
-	total, terr := coll.CountDocuments(ctx, filter)
 	totalI := -1
-	if terr == nil {
+	if *count {
+		total, err := coll.CountDocuments(ctx, filter)
+		if err != nil {
+			printError(fmt.Sprintf("count failed: %s", err), "Omit --count to retrieve documents without an exact total")
+			return err
+		}
 		totalI = int(total)
 	}
 
@@ -278,6 +283,7 @@ func findUsage() {
 	o.line("  --projection JSON    e.g. '{\"_id\":0,\"email\":1}'")
 	o.line("  --sort JSON          e.g. '{\"createdAt\":-1}'")
 	o.line("  --limit N            default 20")
+	o.line("  --count              include exact total (potentially expensive)")
 	o.line("  --skip N             default 0")
 	o.line("  --fields a,b,c       restrict displayed top-level fields")
 	o.line("  --full               disable string truncation")
@@ -449,11 +455,15 @@ func cmdDistinct(parentCtx context.Context, args []string) error {
 	registerTarget(fs, &t, true)
 	field := fs.String("field", "", "field name to compute distinct values for (required)")
 	query := fs.String("query", "{}", "filter as MongoDB Extended JSON")
-	limit := fs.Int("limit", 100, "max values to display")
+	limit := fs.Int("limit", 100, "max values to display; server still computes all distinct values")
 	timeoutSec := fs.Int("timeout", 30, "query timeout in seconds")
 	fs.Usage = func() {
 		o := newOut()
 		o.line("usage: mongoquery distinct --env <env> --service <svc> --collection <c> --field <f> [--query JSON]")
+		o.line("flags:")
+		o.line("  --limit N         max values displayed, default 100 (not a server-side limit)")
+		o.line("  --timeout N       seconds, default 30")
+		o.line("warning: MongoDB computes all distinct values; use a $group/$limit pipeline for high-cardinality fields")
 		o.line("example:")
 		o.line("  mongoquery distinct --env staging --service orders --collection orders --field status")
 	}
