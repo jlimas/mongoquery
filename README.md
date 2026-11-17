@@ -6,7 +6,7 @@ Filters and pipelines are validated before they reach MongoDB, rejecting any ope
 
 ## Features
 
-- **Six subcommands:** `find`, `aggregate`, `count`, `distinct`, `collections`, `list`
+- **Commands:** `find`, `aggregate`, `count`, `distinct`, `collections`, `list`, `version`
 - **Multi-environment config:** define named environments and services in a single YAML file
 - **Read-only by construction:** blocks `$out`, `$merge`, `$where`, `$function`, and `$accumulator` before the query is sent
 - **Readable output:** field projection, sort, limit, skip, and string truncation
@@ -29,6 +29,10 @@ Make sure `$HOME/.local/bin` is on your `PATH`.
 ```sh
 make build       # produces ./mongoquery binary in the current directory
 ```
+
+Builds embed the Git tag or revision (with `-dirty` for local changes).
+Override it for releases with `make build VERSION=v1.2.3`. Builds made directly
+with `go build` report `dev` unless `-ldflags '-X main.version=v1.2.3'` is supplied.
 
 ## Configuration
 
@@ -65,6 +69,15 @@ multiple YAML documents so typos do not silently change the selected target.
 Run `mongoquery` with no arguments to see all configured environments and services.
 
 ## Usage
+
+### Show the version
+
+```sh
+mongoquery version
+mongoquery --version
+```
+
+Both print `mongoquery <version>` and work without configuration or a database.
 
 ### List configured environments and services
 

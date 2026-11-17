@@ -28,6 +28,11 @@ func run(args []string) (err error) {
 		return cmdHome(ctx)
 	}
 	switch args[0] {
+	case "version", "--version":
+		if len(args) > 1 {
+			return unexpectedArgs(args[1:])
+		}
+		return printVersion(os.Stdout)
 	case "home":
 		if len(args) > 1 {
 			return unexpectedArgs(args[1:])

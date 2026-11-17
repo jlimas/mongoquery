@@ -3,6 +3,7 @@ PREFIX ?= $(HOME)/.local
 INSTALL_DIR := $(PREFIX)/bin
 CONFIG := $(if $(MONGOQUERY_CONFIG),$(MONGOQUERY_CONFIG),$(HOME)/.mongoquery.yaml)
 GO ?= go
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w
 
 .PHONY: all build install uninstall run tidy fmt vet test vuln clean config help
@@ -10,7 +11,7 @@ LDFLAGS := -s -w
 all: build
 
 build:
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+	$(GO) build -ldflags "$(LDFLAGS) -X main.version=$(VERSION)" -o $(BINARY) .
 
 install: build
 	mkdir -p $(INSTALL_DIR)
